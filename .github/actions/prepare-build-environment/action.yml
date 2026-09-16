@@ -1,0 +1,22 @@
+name: prepare-environment
+description: Prepares the build environment
+runs:
+  using: "composite"
+  steps:
+    - name: Prepares the build environment
+      run: |
+        mkdir -p "${GITHUB_WORKSPACE}/build"
+        sudo apt-get update -y
+        sudo apt-get install -y --no-install-recommends \
+           tar \
+           wget \
+           cmake \
+           buildah \
+           ninja-build \
+           clang \
+           clang-tidy \
+           pkg-config \
+           build-essential \
+           libpq-dev \
+      shell: bash
+

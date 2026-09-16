@@ -1,0 +1,144 @@
+# Makes the base build container.  CI publishes this to
+#   ghcr.io/uofuseismo/cctreviewbackend-base:ubuntu24
+# via .github/workflows/base-image.yaml.  To build locally:
+#   buildah bud -t cctreviewbackend-base:ubuntu24 -f scripts/Dockerfile.u24 scripts
+
+FROM ubuntu:24.04
+LABEL org.opencontainers.image.authors="Ben Baker <ben.baker@utah.edu>"
+LABEL org.opencontainers.image.source="https://github.com/uofuseismo/cctReviewBackend"
+# Keeps apt (tzdata in particular) from prompting during the build
+ARG DEBIAN_FRONTEND=noninteractive
+#USER root
+ENV PATH="$PATH:/usr/local/bin"
+ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/local/lib"
+#EXPOSE 80
+#EXPOSE 8080
+
+RUN apt-get update &&\
+    apt-get install -y \
+       wget \
+       git \
+       gcc \
+       g++ \
+       git \
+       curl \
+       make \
+       cmake \
+       libfmt-dev \
+       libboost-all-dev \
+       libssl-dev \
+       openssl \
+       libcurl4-openssl-dev \
+       groff-base \
+       zlib1g-dev \
+       libpq-dev \
+       libbz2-dev \
+       liblzma-dev
+
+# Install software (catch2, spdlog, nlohmann-json, jwt-cpp, openldap, soci, mongocxx, zstd)
+RUN cd /home/ubuntu &&\
+    mkdir -p /usr/local/include &&\
+    mkdir -p /usr/local/lib &&\
+    wget https://github.com/fmtlib/fmt/archive/refs/tags/12.2.0.tar.gz &&\
+    tar -xf 12.2.0.tar.gz &&\
+    rm 12.2.0.tar.gz &&\
+    cd fmt-12.2.0 &&\
+    cmake -B build -DFMT_TEST=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release &&\
+    cmake --build build --parallel &&\
+    cmake --install build &&\
+    cd ../ &&\
+    rm -rf fmt-12.2.0 &&\
+    wget https://sqlite.org/2026/sqlite-autoconf-3530400.tar.gz &&\
+    tar -xf sqlite-autoconf-3530400.tar.gz &&\
+    rm sqlite-autoconf-3530400.tar.gz &&\
+    cd sqlite-autoconf-3530400 &&\
+    ./configure --prefix=/usr/local &&\
+    make -j$(nproc) &&\
+    make install &&\
+    rm /usr/local/lib/libsqlite3.so* &&\
+    cd ../ &&\
+    rm -rf sqlite-autoconf-3530400 &&\
+    wget https://github.com/catchorg/Catch2/archive/refs/tags/v3.16.0.tar.gz &&\
+    tar -xf v3.16.0.tar.gz &&\
+    rm v3.16.0.tar.gz &&\
+    cd Catch2-3.16.0/ &&\
+    cmake -B build -DCMAKE_BUILD_TYPE=Release &&\
+    cmake --build build --parallel &&\
+    cmake --install build &&\
+    cd /home/ubuntu &&\
+    rm -rf Catch2-3.16.0/ &&\
+    wget https://github.com/gabime/spdlog/archive/refs/tags/v1.17.0.tar.gz &&\
+    tar -xf v1.17.0.tar.gz &&\
+    rm v1.17.0.tar.gz &&\
+    cd spdlog-1.17.0 &&\
+    cmake -B build -DCMAKE_BUILD_TYPE=Release -DSPDLOG_BUILD_SHARED=OFF &&\
+    cmake --build build --parallel &&\
+    cmake --install build &&\
+    cd /home/ubuntu &&\
+    rm -rf spdlog-1.17.0 &&\
+    wget https://github.com/nlohmann/json/archive/refs/tags/v3.12.0.tar.gz &&\
+    tar -xf v3.12.0.tar.gz &&\
+    rm v3.12.0.tar.gz &&\
+    cd json-3.12.0/ &&\
+    cmake -B build -DCMAKE_BUILD_TYPE=Release -DJSON_BuildTests=OFF &&\
+    cmake --build build --parallel &&\
+    cmake --install build &&\
+    cd /home/ubuntu &&\
+    rm -rf json-3.12.0 &&\
+    wget https://github.com/Thalhammer/jwt-cpp/archive/refs/tags/v0.7.0.tar.gz &&\
+    tar -xf v0.7.0.tar.gz &&\
+    rm v0.7.0.tar.gz &&\
+    cd jwt-cpp-0.7.0/ &&\
+    cmake -B build -DJWT_BUILD_EXAMPLES=OFF -DJWT_DISABLE_PICOJSON=TRUE &&\
+    cmake --build build --parallel &&\
+    cmake --install build &&\
+    cd /home/ubuntu &&\
+    rm -rf jwt-cpp-0.7.0/ &&\
+    wget https://www.openldap.org/software/download/OpenLDAP/openldap-release/openldap-2.7.0.tgz &&\
+    tar -xf openldap-2.7.0.tgz &&\
+    rm openldap-2.7.0.tgz &&\
+    cd openldap-2.7.0 &&\
+    ./configure --prefix=/usr/local &&\
+    make -j$(nproc) &&\
+    make install &&\
+    cd /home/ubuntu &&\
+    rm -rf openldap-2.7.0 &&\
+    wget https://github.com/SOCI/soci/archive/refs/tags/v4.1.4.tar.gz &&\
+    tar -xf v4.1.4.tar.gz &&\
+    rm v4.1.4.tar.gz &&\
+    cd soci-4.1.4 &&\
+    cmake -B build -DSOCI_TESTS=OFF -DCMAKE_CXX_STANDARD=17 -DSOCI_STATIC=ON -DCMAKE_BUILD_TYPE=Release &&\
+    cmake --build build --parallel &&\
+    cmake --install build &&\
+    cd /home/ubuntu &&\
+    rm -rf soci-4.1.4 &&\
+    wget https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz &&\
+    cd /home/ubuntu &&\
+    tar -xf zstd-1.5.7.tar.gz &&\
+    rm zstd-1.5.7.tar.gz &&\
+    cd zstd-1.5.7 &&\
+    make -j$(nproc) &&\
+    make install &&\
+    cd /home/ubuntu &&\
+    wget https://github.com/geographiclib/geographiclib/archive/refs/tags/v2.7.tar.gz &&\
+    tar -xf v2.7.tar.gz &&\
+    rm v2.7.tar.gz &&\
+    cd geographiclib-2.7 &&\
+    mkdir build &&\
+    cd build &&\
+    cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DRELEASE=ON -DCMAKE_BINARY_DIR=./willDelete &&\
+    make -j$(nproc) &&\
+    make install &&\
+    cd /home/ubuntu &&\
+    rm -r geographiclib-2.7 
+
+# Build the software
+#RUN cd /home/ubuntu &&\
+#    git clone https://github.com/uofuseismo/cctReviewBackend.git &&\
+#    cd cctReviewBackend/backend &&\
+#    cmake -B build -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release &&\
+#    cmake --build build --parallel &&\
+#    cmake --install build &&\
+#    cd /home/ubuntu &&\
+#    rm -rf mlReview
+     
