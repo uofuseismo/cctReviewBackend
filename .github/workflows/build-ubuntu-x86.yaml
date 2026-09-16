@@ -155,7 +155,7 @@ jobs:
         working-directory: container
         run: |
           echo "$QUAY_ROBOT_PASSWORD" | buildah login -u "$QUAY_ROBOT_USER" --password-stdin quay.io
-          version=$(ls *tar.gz | sed 's/MLReviewBackend-//g' | sed 's/-Linux.tar.gz//g')
+          version=$(ls *tar.gz | sed 's/CCTReviewBackend-//g' | sed 's/-Linux.tar.gz//g')
           echo "Will build container version ${version}"
           buildah bud -t ${CONTAINER_NAME}:${version} -t ${CONTAINER_NAME}:latest -f ./Dockerfile.u24
           dated="${version}-$(date -u +%Y%m%d)"
