@@ -124,6 +124,30 @@ if (${ZLIB_FOUND})
 endif()
 
 ##########################################################################################
+#                                        Containers                                      #
+##########################################################################################
+include(CPackComponent)
+if (${BUILD_CONTAINER})
+   include(CPackComponent)
+   configure_file(${CMAKE_CURRENT_SOURCE_DIR}/scripts/Dockerfile.u24.in
+                  ${CMAKE_CURRENT_BINARY_DIR}/Dockerfile.u24 @ONLY)
+   add_custom_target(${PROJECT_NAME}-u24
+                     COMMENT "Creating container file for ${PROJECT_NAME}"
+                     COMMAND ${CMAKE_CPACK_COMMAND} -G TGZ 
+                     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} VERBATIM)
+   add_dependencies(${PROJECT_NAME}-u24 cctReviewBackend)
+   find_program(buildah_EXECUTABLE buildah)
+   if (buildah_EXECUTABLE)
+      add_custom_target(buildah
+                        COMMENT "Preparing the container with buildah"
+                        COMMAND ${buildah_EXECUTABLE} bud -t cctreviewbackend:${PROJECT_VERSION} -t cctreviewbackend:latest -f ./Dockerfile.u24
+                        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} VERBATIM)
+      add_dependencies(buildah ${PROJECT_NAME}-u24)
+   endif()
+endif()
+
+
+##########################################################################################
 #                                      Installation                                      #
 ##########################################################################################
 include(GNUInstallDirs)

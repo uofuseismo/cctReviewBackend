@@ -140,5 +140,5 @@ RUN cd /home/ubuntu &&\
 #    cmake --build build --parallel &&\
 #    cmake --install build &&\
 #    cd /home/ubuntu &&\
-#    rm -rf mlReview
+#    rm -rf cctReview
      
