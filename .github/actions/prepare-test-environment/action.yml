@@ -1,0 +1,13 @@
+name: prepare-test-environment
+description: Prepares the test environment
+# Runs inside the cctreviewbackend-base container (see the test job), which
+# already has cmake/ctest and every library the tests link against, so
+# there is nothing to install.  Note: GITHUB_WORKSPACE rather than
+# github.workspace - the latter is the host path, which does not exist
+# inside a container job.
+runs:
+  using: "composite"
+  steps:
+    - name: Prepare environment
+      run: mkdir -p "${GITHUB_WORKSPACE}/build"
+      shell: bash

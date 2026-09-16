@@ -14,6 +14,7 @@
 #include "aqmsPostgresClient.hpp"
 #include "cctPostgresService.hpp"
 #include "postgresql.hpp"
+#include "version.hpp"
 
 struct ProgramOptions
 {

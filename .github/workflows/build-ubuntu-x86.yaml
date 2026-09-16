@@ -1,0 +1,174 @@
+name: CCT Review Backend Application
+run-name: Pipeline for branch ${{ github.ref_name }}
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '18 9 * * *'
+  # A manual trigger, for when the registry was down rather than the code
+  # being wrong.
+  workflow_dispatch:
+  #pull_request:
+  #  branches: [main]
+
+# One pipeline at a time.  Not cancel-in-progress: a run that is already
+# pushing should finish rather than leave a tag half-written.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PROJECT_NAME: CCTReviewBackend
+  CONTAINER_NAME: cctreviewbackend
+  QUAY_DIRECTORY: cctreviewbackend
+  BUILD_TYPE: Release
+  CXX: g++
+  CC: gcc
+
+jobs:
+  build:
+    runs-on: ${{ matrix.distro }}
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [ubuntu-24.04]
+        arch: [x86]
+        BUILD_TARGET: [Release]
+    name: Build for ${{ matrix.distro }} ${{ matrix.arch }}
+    permissions:
+      contents: read
+      packages: read
+    # All third-party dependencies are baked into this image; see
+    # scripts/Dockerfile.u24 and .github/workflows/base-image.yaml.
+    # (The env context is not available here, hence no ${{ env.* }}.)
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/cctreviewbackend-base:ubuntu24
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # The job runs as root but the workspace is owned by the runner user,
+      # so git (used by CMake for the version tag) refuses the repo otherwise.
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+
+      # The base image only has static mongocxx/libmseed, hence no shared libs.
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTS=ON -DBUILD_CONTAINER=ON
+
+      - name: Build
+        run: |
+           cmake --build build --parallel
+           ldd build/cctReviewBackend
+           #cp include/cctReview/version.hpp build
+
+      - name: Test install
+        run: 
+           cmake --install build
+
+      # Package here rather than in the package job.  cpack's preinstall step
+      # re-checks the build tree: on the host the /__w paths do not exist, and
+      # in a fresh container the new checkout is newer than the unpacked build
+      # directory, so everything would be rebuilt.
+      # BUILD_CONTAINER=ON (Configure) writes build/Dockerfile.u24.
+      - name: Package tgz
+        run: |
+          cd build
+          cpack -G TGZ -B "${GITHUB_WORKSPACE}/cpack"
+          mkdir -p "${GITHUB_WORKSPACE}/container"
+          cp "${GITHUB_WORKSPACE}"/cpack/*.tar.gz Dockerfile.u24 "${GITHUB_WORKSPACE}/container/"
+          ls -l "${GITHUB_WORKSPACE}/container"
+
+      - name: Upload container context
+        uses: actions/upload-artifact@v7
+        with:
+          name: container-context
+          path: container/
+          retention-days: 1
+
+      - name: Upload build directory
+        uses: ./.github/actions/upload-build-directory
+
+  test:
+    needs: build
+    runs-on: ${{ matrix.distro }}
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [ubuntu-24.04]
+        arch: [x86]
+    name: Test on ${{ matrix.distro }} ${{ matrix.arch }}
+    permissions:
+      contents: read
+      packages: read
+    # Same image as the build job: the build directory records absolute
+    # paths from inside the container (/__w/...), so ctest only finds the
+    # test executables if it runs in the container too.
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/cctreviewbackend-base:ubuntu24
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Prepare test environment
+        uses: ./.github/actions/prepare-test-environment
+
+      - name: Download build directory
+        uses: ./.github/actions/download-build-directory
+
+      #- name: Run unit tests for release
+      #  run: ctest --test-dir build --output-on-failure
+
+  package:
+    needs: test
+    runs-on: ${{ matrix.distro }}
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [ubuntu-24.04]
+        arch: [x86]
+        BUILD_TARGET: [Release]
+    name: Package for ${{ matrix.distro }} ${{ matrix.arch }}
+    # On the host rather than in the base container: buildah needs
+    # privileges a job container does not have, and the runner image
+    # already ships buildah.  Only the tarball and Dockerfile from the
+    # build job are needed - no checkout, no build tree.
+
+    steps:
+      - name: Download container context
+        uses: actions/download-artifact@v8
+        with:
+          name: container-context
+          path: container
+
+      - name: Build and push image
+        env:
+          QUAY_ROBOT_PASSWORD: ${{ secrets.QUAY_ROBOT_PASSWORD }}
+          QUAY_ROBOT_USER: ${{ secrets.QUAY_ROBOT_USER }}
+        working-directory: container
+        run: |
+          echo "$QUAY_ROBOT_PASSWORD" | buildah login -u "$QUAY_ROBOT_USER" --password-stdin quay.io
+          version=$(ls *tar.gz | sed 's/MLReviewBackend-//g' | sed 's/-Linux.tar.gz//g')
+          echo "Will build container version ${version}"
+          buildah bud -t ${CONTAINER_NAME}:${version} -t ${CONTAINER_NAME}:latest -f ./Dockerfile.u24
+          dated="${version}-$(date -u +%Y%m%d)"
+          buildah tag ${CONTAINER_NAME}:${version} quay.io/uuss/${QUAY_DIRECTORY}:${version}
+          buildah tag ${CONTAINER_NAME}:${version} quay.io/uuss/${QUAY_DIRECTORY}:${dated}
+          push_tag() {
+            for i in 1 2 3; do
+              buildah push "$1" && return 0
+              echo "Push of $1 failed (attempt $i); retrying"
+              sleep 15
+            done
+            echo "ERROR: could not push $1 after 3 attempts"
+            return 1
+          }
+          push_tag quay.io/uuss/${QUAY_DIRECTORY}:${version}
+          push_tag quay.io/uuss/${QUAY_DIRECTORY}:${dated}

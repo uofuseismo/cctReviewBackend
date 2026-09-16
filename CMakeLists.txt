@@ -62,6 +62,25 @@ FetchContent_declare(
 set(JWT_BUILD_EXAMPLES OFF CACHE BOOL "disable building examples" FORCE)
 FetchContent_MakeAvailable(jwt-cpp)
 
+find_package(Git)
+if (Git_FOUND)
+   execute_process(
+     COMMAND ${GIT_EXECUTABLE} --no-pager log -n 1 HEAD "--pretty=format:%h"
+     OUTPUT_VARIABLE cctReviewBackend_GITTAG
+     RESULT_VARIABLE gitresult
+     ERROR_QUIET
+     OUTPUT_STRIP_TRAILING_WHITESPACE
+   )   
+   if (gitresult EQUAL 0)
+      message(STATUS "Last Git commit: ${cctReviewBackend_GITTAG}")
+   endif()
+else()
+   set(cctReviewBackend_GITTAG "") 
+endif()
+configure_file(${CMAKE_SOURCE_DIR}/src/version.hpp.in
+               ${CMAKE_SOURCE_DIR}/src/version.hpp)
+
+
 add_executable(cctReviewBackend
                src/main.cpp
                src/ldap.cpp
@@ -71,11 +90,12 @@ add_executable(cctReviewBackend
                src/permissions.cpp
                src/postgresql.cpp
                src/aqmsPostgresClient.cpp
-               src/cctPostgresService.cpp)
+               src/cctPostgresService.cpp
+               src/version.cpp)
 
 target_link_libraries(cctReviewBackend
                       PRIVATE SOCI::Core SOCI::PostgreSQL
-                              Boost::program_options
+                              Boost::headers Boost::program_options
                               spdlog::spdlog
                               nlohmann_json::nlohmann_json
                               jwt-cpp::jwt-cpp
@@ -85,8 +105,9 @@ target_link_libraries(cctReviewBackend
 target_include_directories(cctReviewBackend
                            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
                                    ${PostgreSQL_INCLUDE_DIRS}
-                                   ${OPENLDAP_INCLUDE_DIR}
-                                   Boost::headers)
+                                   #${OPENLDAP_INCLUDE_DIR}
+                                   #Boost::headers
+                                   )
 set_target_properties(cctReviewBackend PROPERTIES
                       CXX_STANDARD 20
                       CXX_STANDARD_REQUIRED YES 
