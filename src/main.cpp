@@ -500,8 +500,6 @@ int main(int argc, char* argv[])
         std::string ldapOrganizationUnit{std::getenv("LDAP_ORGANIZATION_UNIT")};
         std::string ldapDomainComponent{std::getenv("LDAP_DOMAIN_COMPONENT")};
 */
-std::cout << programOptions.ldapOrganizationalUnit << std::endl;
-std::cout << programOptions.ldapDomainComponent << std::endl;
         constexpr bool maintainConnection{false};
         ldapAuthenticator
             = std::make_shared<CCTService::LDAP> 
