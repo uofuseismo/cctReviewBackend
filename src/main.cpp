@@ -147,7 +147,7 @@ struct ProgramOptions
 
         options.aqmsTestReadWriteUser
             = requireSecret("AQMSTest.readWriteUser",
-                            "AQMSTest.readWriteFile");
+                            "AQMSTest.readWriteUserFile");
         options.aqmsTestReadWritePassword
             = requireSecret("AQMSTest.readWritePassword",
                             "AQMSTest.readWritePasswordFile");
@@ -163,7 +163,7 @@ struct ProgramOptions
 
         options.aqmsProductionReadWriteUser
             = requireSecret("AQMSProduction.readWriteUser",
-                            "AQMSProduction.readWriteFile");
+                            "AQMSProduction.readWriteUserFile");
         options.aqmsProductionReadWritePassword
             = requireSecret("AQMSProduction.readWritePassword",
                             "AQMSProduction.readWritePasswordFile");
@@ -179,7 +179,7 @@ struct ProgramOptions
 
         options.cctReadWriteUser
             = requireSecret("CCTDB.readWriteUser",
-                            "CCTDB.readWriteFile");
+                            "CCTDB.readWriteUserFile");
         options.cctReadWritePassword
             = requireSecret("CCTDB.readWritePassword",
                             "CCTDB.readWritePasswordFile");
