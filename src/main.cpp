@@ -15,16 +15,189 @@
 #include "cctPostgresService.hpp"
 #include "postgresql.hpp"
 #include "version.hpp"
+#include "secretFile.hpp"
+
+#define APPLICATION_NAME "cctReviewBackend"
 
 struct ProgramOptions
 {
-    boost::asio::ip::address address{boost::asio::ip::make_address("0.0.0.0")};
+    std::string applicationName{APPLICATION_NAME};
+    int verbosity{3};
+
+    boost::asio::ip::address address{boost::asio::ip::make_address("127.0.0.1")};
     std::filesystem::path documentRoot{"./"}; 
     int nThreads{1};
-    unsigned short port{80};
+    unsigned short port{8000};
     bool helpOnly{false};
+
+    std::string aqmsTestReadWriteUser;
+    std::string aqmsTestReadWritePassword;
+    std::string aqmsTestDatabaseName;
+    std::string aqmsTestHost;
+    uint16_t aqmsTestPort{5432};
+
+    std::string aqmsProductionReadWriteUser;
+    std::string aqmsProductionReadWritePassword;
+    std::string aqmsProductionDatabaseName;
+    std::string aqmsProductionHost;
+    uint16_t aqmsProductionPort{5432};
+
+    std::string cctReadWriteUser;
+    std::string cctReadWritePassword;
+    std::string cctDatabaseName;
+    std::string cctHost;
+    uint16_t cctPort{5432};
+
+
+    std::string ldapHost;
+    uint16_t ldapPort{636};
+    std::string ldapOrganizationalUnit;
+    std::string ldapDomainComponent;
+
+    static ProgramOptions parseIniFile(const std::filesystem::path &iniFile)
+    {   
+        if (!std::filesystem::exists(iniFile))
+        {
+            throw std::invalid_argument(std::string{iniFile}
+                                      + " does not exist");
+        }
+        ProgramOptions options;
+
+        // Parse the initialization file
+        boost::property_tree::ptree propertyTree;
+        boost::property_tree::ini_parser::read_ini(iniFile, propertyTree);
+
+        options.applicationName
+            = propertyTree.get<std::string> ("General.applicationName",
+                                             options.applicationName);
+        if (options.applicationName.empty())
+        {
+            options.applicationName = APPLICATION_NAME;
+        }
+        options.verbosity
+            = propertyTree.get<int> ("General.verbosity", options.verbosity);
+
+        auto stringAddress
+            = propertyTree.get<std::string> ("Beast.address", "127.0.0.1");
+        if (stringAddress.empty())
+        {
+            throw std::invalid_argument("Beast address not set");
+        }
+        options.address = boost::asio::ip::make_address(stringAddress);
+
+        options.port = propertyTree.get<uint16_t> ("Beast.port", options.port);
+        if (options.port == 0)
+        {
+            throw std::invalid_argument("Port cannot be 0");
+        }
+    
+        options.nThreads
+            = propertyTree.get<int> ("Beast.numberOfThreads", options.nThreads);
+        if (options.nThreads < 1)
+        {
+            throw std::invalid_argument("Number of threads must be positive");
+        }
+
+        // A setting that must be given, either inline or in a file.  An
+        // empty value is the same as an absent one: an empty password is
+        // never what was meant, and it would otherwise surface as a
+        // connection failure rather than a configuration error.
+        auto requireSecret
+            = [&propertyTree](const std::string &inlineKey,
+                              const std::string &fileKey) -> std::string
+        {
+            auto value = ::resolveSecret(propertyTree, inlineKey, fileKey);
+            if (!value || value->empty())
+            {
+                throw std::invalid_argument("Set " + inlineKey + " or "
+                                          + fileKey);
+            }
+            return *value;
+        };
+        // A setting that must be given inline - these are not secrets.
+        auto requireString
+            = [&propertyTree](const std::string &key) -> std::string
+        {
+            auto value = propertyTree.get_optional<std::string> (key);
+            if (!value || value->empty())
+            {
+                throw std::invalid_argument("Set " + key);
+            }
+            return *value;
+        };
+        // A port must be non-zero; 0 asks the OS to pick one, which for a
+        // service we connect to is never right.
+        auto getPort
+            = [&propertyTree](const std::string &key,
+                              const uint16_t defaultPort) -> uint16_t
+        {   
+            auto port = propertyTree.get<uint16_t> (key, defaultPort);
+            if (port == 0){throw std::invalid_argument(key + " cannot be 0");}
+            return port;
+        };
+
+
+        options.ldapHost = requireSecret("LDAP.host", "LDAP.hostFile");
+        options.ldapPort = getPort("LDAP.port", options.ldapPort);
+        options.ldapOrganizationalUnit
+            = requireString("LDAP.organizationalUnit");
+        options.ldapDomainComponent
+            = requireString("LDAP.domainComponent");
+ 
+
+        options.aqmsTestReadWriteUser
+            = requireSecret("AQMSTest.readWriteUser",
+                            "AQMSTest.readOnlyWriteFile");
+        options.aqmsTestReadWritePassword
+            = requireSecret("AQMSTest.readWritePassword",
+                            "AQMSTest.readWritePasswordFile");
+        options.aqmsTestDatabaseName
+            = requireSecret("AQMSTest.databaseName",
+                            "AQMSTest.databaseNameFile");
+        options.aqmsTestHost
+            = requireSecret("AQMSTest.host",
+                            "AQMSTest.hostFile");
+        options.aqmsTestPort
+            = getPort("AQMSTest.port",
+                      options.aqmsTestPort);
+
+        options.aqmsProductionReadWriteUser
+            = requireSecret("AQMSProduction.readWriteUser",
+                            "AQMSProduction.readOnlyWriteFile");
+        options.aqmsProductionReadWritePassword
+            = requireSecret("AQMSProduction.readWritePassword",
+                            "AQMSProduction.readWritePasswordFile");
+        options.aqmsProductionDatabaseName
+            = requireSecret("AQMSProduction.databaseName",
+                            "AQMSProduction.databaseNameFile");
+        options.aqmsProductionHost
+            = requireSecret("AQMSProduction.host",
+                            "AQMSProduction.hostFile");
+        options.aqmsProductionPort 
+            = getPort("AQMSProduction.port",
+                      options.aqmsProductionPort);
+
+        options.cctReadWriteUser
+            = requireSecret("CCTDB.readWriteUser",
+                            "CCTDB.readOnlyWriteFile");
+        options.cctReadWritePassword
+            = requireSecret("CCTDB.readWritePassword",
+                            "CCTDB.readWritePasswordFile");
+        options.cctDatabaseName
+            = requireSecret("CCTDB.databaseName",
+                            "CCTDB.databaseNameFile");
+        options.cctHost
+            = requireSecret("CCTDB.host",
+                            "CCTDB.hostFile");
+        options.cctPort 
+            = getPort("CCTDB.port",
+                      options.cctPort);
+
+        return options;
+   }
 };
 
+/*
 /// @brief Parses the command line options.
 [[nodiscard]] ::ProgramOptions parseCommandLineOptions(int argc, char *argv[])
 {
@@ -85,7 +258,74 @@ Allowed options)""");
     }
     return result;
 }
+*/
 
+/// @brief Parses the command line options.
+[[nodiscard]] 
+std::pair<std::string, bool> parseCommandLineOptions(int argc, char *argv[])
+{
+    std::string iniFile;
+    boost::program_options::options_description desc(
+R"""(
+The cctReviewService is the API for the CCT Review frontend.
+Example usage:
+    cctReviewService --ini=/path/to/config.ini
+Allowed options)""");
+    desc.add_options()
+        ("help", "Produces this help message")
+        ("ini",  boost::program_options::value<std::string> (), 
+                 "The initialization file for this executable");
+    boost::program_options::variables_map vm; 
+    boost::program_options::store(
+        boost::program_options::parse_command_line(argc, argv, desc), vm); 
+    boost::program_options::notify(vm);
+    if (vm.count("help"))
+    {    
+        std::cout << desc << std::endl;
+        return {iniFile, true};
+    }   
+    if (vm.count("ini"))
+    {    
+        iniFile = vm["ini"].as<std::string>();
+        if (!std::filesystem::exists(iniFile))
+        {
+            throw std::runtime_error("Initialization file: " + iniFile
+                                   + " does not exist");
+        }
+    }    
+    return {iniFile, false};
+}
+
+std::shared_ptr<CCTService::CCTPostgresService> createCCTPostgresService(
+    const ProgramOptions &options,
+    const std::set<std::string> &schemas)
+{
+    if (schemas.empty()){throw std::runtime_error("No schemas!");}
+    // Create pg connection
+    auto connection = std::make_unique<CCTService::PostgreSQL> (); 
+    connection->setUser(options.cctReadWriteUser);
+    connection->setPassword(options.cctReadWritePassword);
+    connection->setDatabaseName(options.cctDatabaseName);
+    connection->setAddress(options.cctHost);
+    connection->setPort(options.cctPort);
+    connection->connect();
+    if (!connection->isConnected())
+    {
+        throw std::runtime_error("Could not create CCT connection");
+    }   
+    // Create the service
+    auto service
+        = std::make_shared<CCTService::CCTPostgresService>
+          (std::move(connection), schemas);
+    service->start();
+    if (!service->isRunning())
+    {
+        throw std::runtime_error("Could not start service");
+    }   
+    return service;
+}
+
+/*
 std::shared_ptr<CCTService::CCTPostgresService> createCCTPostgresService(
     const std::set<std::string> &schemas)
 {
@@ -113,8 +353,48 @@ std::shared_ptr<CCTService::CCTPostgresService> createCCTPostgresService(
     } 
     return service;
 }
+*/
 
+std::unique_ptr<CCTService::AQMSPostgresClient> createAQMSPostgresClient(
+    const ProgramOptions &options,
+    const std::string &schema)
+{
+    // Create pg connection
+    auto connection = std::make_unique<CCTService::PostgreSQL> ();
+    if (schema == "production")
+    {
+        connection->setUser(options.aqmsProductionReadWriteUser);
+        connection->setPassword(options.aqmsProductionReadWritePassword);
+        connection->setDatabaseName(options.aqmsProductionDatabaseName);
+        connection->setAddress(options.aqmsProductionHost);
+        connection->setPort(options.aqmsProductionPort);
+    }
+    else if (schema == "test")
+    {
+        connection->setUser(options.aqmsTestReadWriteUser);
+        connection->setPassword(options.aqmsTestReadWritePassword);
+        connection->setDatabaseName(options.aqmsTestDatabaseName);
+        connection->setAddress(options.aqmsTestHost);
+        connection->setPort(options.aqmsTestPort);
+    }
+    else
+    {
+        throw std::invalid_argument("Unhandled schema");
+    }
+    connection->connect();
+    if (!connection->isConnected())
+    {
+        throw std::runtime_error("Could not create CCT connection for schema "
+                               + schema);
+    }
+    // Create the service
+    auto client
+        = std::make_unique<CCTService::AQMSPostgresClient>
+          (std::move(connection));
+    return client;
+}
 
+/*
 std::unique_ptr<CCTService::AQMSPostgresClient> createAQMSPostgresClient(
     const std::string &schema)
 {
@@ -151,6 +431,7 @@ std::unique_ptr<CCTService::AQMSPostgresClient> createAQMSPostgresClient(
           (std::move(connection));
     return client;
 }
+*/
 
 
 /*
@@ -162,6 +443,38 @@ std::shared_ptr<CCTService::AQMSPostgresService> createAQMSPostgresService()
 
 int main(int argc, char* argv[])
 {
+    spdlog::info("Launching mlReviewBackend version "
+               + CCTReview::Version::getVersionWithTag());
+
+    std::filesystem::path iniFile;
+    try
+    {   
+        auto [iniFileName, isHelp] = ::parseCommandLineOptions(argc, argv);
+        if (isHelp){return EXIT_SUCCESS;}
+        if (iniFileName.empty())
+        {   
+            throw std::runtime_error("No initialization file specified");
+        }   
+        iniFile = iniFileName;
+    }
+    catch (const std::exception &e)
+    {
+        spdlog::critical(e.what());
+        return EXIT_FAILURE;
+    }
+    
+    ::ProgramOptions programOptions;
+    try
+    {
+        programOptions = ::ProgramOptions::parseIniFile(iniFile);
+    }
+    catch (const std::exception &e)
+    {
+        spdlog::critical(e.what());
+        return EXIT_FAILURE;
+    }
+
+/*
     ::ProgramOptions programOptions;
     try
     {
@@ -173,7 +486,7 @@ int main(int argc, char* argv[])
         spdlog::error(e.what());
         return EXIT_FAILURE;
     }
-
+*/
 
     const std::set<std::string> schemas{"production", "test"};
 
@@ -181,17 +494,19 @@ int main(int argc, char* argv[])
     std::shared_ptr<CCTService::IAuthenticator> ldapAuthenticator;
     try
     {
+/*
         std::string ldapServerAddress{std::getenv("LDAP_HOST")};
         int ldapPort{std::stoi(std::getenv("LDAP_PORT"))};
         std::string ldapOrganizationUnit{std::getenv("LDAP_ORGANIZATION_UNIT")};
         std::string ldapDomainComponent{std::getenv("LDAP_DOMAIN_COMPONENT")};
+*/
         constexpr bool maintainConnection{false};
         ldapAuthenticator
             = std::make_shared<CCTService::LDAP> 
-                (ldapServerAddress,
-                 ldapPort,
-                 ldapOrganizationUnit,
-                 ldapDomainComponent,
+                (programOptions.ldapHost, //ServerAddress,
+                 programOptions.ldapPort,
+                 programOptions.ldapOrganizationalUnit,
+                 programOptions.ldapDomainComponent,
                  CCTService::LDAP::Version::Three,
                  CCTService::LDAP::TLSVerifyClient::Allow,
                  maintainConnection);
@@ -208,7 +523,8 @@ int main(int argc, char* argv[])
     std::shared_ptr<CCTService::CCTPostgresService> cctPostgresService{nullptr};
     try
     {
-        cctPostgresService = ::createCCTPostgresService(schemas);
+        //cctPostgresService = ::createCCTPostgresService(schemas);
+        cctPostgresService = ::createCCTPostgresService(programOptions, schemas);
     }
     catch (const std::exception &e)
     {
@@ -225,8 +541,10 @@ int main(int argc, char* argv[])
     {
         try
         {
-            auto client = ::createAQMSPostgresClient(schema);
-            aqmsClients->insert(std::move( std::pair{schema, std::move(client)}));
+            //auto client = ::createAQMSPostgresClient(schema);
+            auto client = ::createAQMSPostgresClient(programOptions, schema);
+            aqmsClients->insert(
+                std::move( std::pair{schema, std::move(client)}) );
         }
         catch (const std::exception &e)
         {
