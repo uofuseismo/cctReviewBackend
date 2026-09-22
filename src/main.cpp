@@ -443,7 +443,7 @@ std::shared_ptr<CCTService::AQMSPostgresService> createAQMSPostgresService()
 
 int main(int argc, char* argv[])
 {
-    spdlog::info("Launching mlReviewBackend version "
+    spdlog::info("Launching cctReviewBackend version "
                + CCTReview::Version::getVersionWithTag());
 
     std::filesystem::path iniFile;
@@ -579,7 +579,9 @@ int main(int argc, char* argv[])
     //::loadServerCertificate(context);
 
     // Create and launch a listening port
-    spdlog::info("Launching HTTP listeners...");
+    spdlog::info("Launching HTTP listeners at "
+               + programOptions.address.to_string()
+               + ":" + std::to_string(programOptions.port));
     std::make_shared<CCTService::Listener>(
         ioContext,
         context,
