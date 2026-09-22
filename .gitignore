@@ -2,3 +2,4 @@ build
 serverCertificate.hpp
 cmake/FindOpenLdap.cmake
 version.hpp
+run
